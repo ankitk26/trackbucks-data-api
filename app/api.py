@@ -2,13 +2,13 @@ from datetime import datetime
 from os import getenv
 
 from fastapi import FastAPI
-from parse_email import get_df, parse_email
-from select_inbox import search_inbox
 from supabase import Client, create_client
+
+from .parse_email import get_df, parse_email
+from .select_inbox import search_inbox
 
 SUPABASE_URL = "https://qjgsmbsouzljaczqfkkv.supabase.co"
 SUPABASE_KEY = getenv("SUPABASE_KEY")
-# "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFqZ3NtYnNvdXpsamFjenFma2t2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE2NzY0ODU4NTcsImV4cCI6MTk5MjA2MTg1N30.1JD0F9Qc93_mfHCCeTLWPFhtq6TtQOWpeHkIHfpL-RI"
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI()
@@ -77,15 +77,6 @@ def add_new_transactions():
             data, count = supabase.table("transactions").insert(curr_dict).execute()
 
         return {"message": "Rows added", "mails_count": email_df.shape[0]}
-
-        # return {
-        #     "last_transaction_timestamp": last_transaction_timestamp,
-        #     "last_date_transactions": list(
-        #         map(lambda x: x["mail_id"], transactions_on_latest_date.data)
-        #     ),
-        #     "mail_ids": mail_ids,
-        #     "unpublished_mail_ids": unpublished_mail_ids,
-        # }
 
     except Exception as e:
         return {"message": str(e)}

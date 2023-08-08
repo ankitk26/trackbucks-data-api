@@ -1,11 +1,8 @@
 import imaplib
 from os import getenv
 
-# USER = "myselfankit51@gmail.com"
-# PWD = "uhqvnpjxtzilmzhe"
-# CHECK_MAIL = "UPI@SC.COM"
 USER = getenv("USER")
-PWD = getenv("PWD")
+PWD = getenv("USER_PASSWORD")
 SMTP_SERVER = "imap.gmail.com"
 SMTP_PORT = 993
 CHECK_MAIL = getenv("CHECK_MAIL")
