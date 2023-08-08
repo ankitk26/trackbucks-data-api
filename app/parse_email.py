@@ -69,7 +69,6 @@ def get_df(email_data):
     df["mail_id"] = df["mail_id"].apply(lambda x: int(x))
     df["upi_ref_id"] = df["upi_ref_id"].apply(lambda x: int(x))
 
-    # Subtracted time to maintain same datetime in Firebase
     df["transaction_date"] = df["transaction_date"].apply(
         lambda x: str(datetime.strptime(x, "%d/%m/%Y %H:%M:%S"))
     )

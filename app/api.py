@@ -7,6 +7,7 @@ from supabase import Client, create_client
 from .parse_email import get_df, parse_email
 from .select_inbox import search_inbox
 
+# Supabase credentials
 SUPABASE_URL = "https://qjgsmbsouzljaczqfkkv.supabase.co"
 SUPABASE_KEY = getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -14,12 +15,14 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 app = FastAPI()
 
 
+# Get all transactions from supabase
 @app.get("/transactions")
 def get_transactions():
     response = supabase.table("transactions").select("*").execute()
     return response.data
 
 
+# Populate all mails to supabase
 @app.post("/transactions")
 def populate_all_transactions():
     mail_ids = search_inbox()
@@ -35,6 +38,7 @@ def populate_all_transactions():
     return {"message": "Rows added", "mails_count": email_df.shape[0]}
 
 
+# Populate new transactions not present in supabase
 @app.post("/new-transactions")
 def add_new_transactions():
     try:
