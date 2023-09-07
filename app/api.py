@@ -61,8 +61,6 @@ def add_new_transactions():
             .execute()
         )
 
-        print(transactions_on_last_transaction_date.data)
-
         transactions_on_last_transaction_date_ids = list(
             map(lambda x: x["upi_ref_id"], transactions_on_last_transaction_date.data)
         )
