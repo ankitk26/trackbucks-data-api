@@ -28,7 +28,6 @@ def get_all_mails(mail):
 def get_unpublished_mails(mail, latest_date):
     # Convert timestamp to 'DD-MMM-YYYY' format
     formatted_dt = latest_date.strftime("%d-%b-%Y")
-    print(formatted_dt)
 
     unpublished_mails = mail.search(
         None, "FROM", f'"{CHECK_MAIL}"', "SINCE", formatted_dt.upper()
