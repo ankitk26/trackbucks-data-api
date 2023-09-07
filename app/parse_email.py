@@ -11,7 +11,6 @@ def parse_email(mail_ids):
 
     data = {
         "UPI Ref. No.": [],
-        "mail_id": [],
         "To VPA": [],
         "From VPA": [],
         "Payee Name": [],
@@ -48,7 +47,6 @@ def parse_email(mail_ids):
                                 pay_val = pay_val.strip()
                                 if pay_key in data:
                                     data[pay_key].append(pay_val)
-                        data["mail_id"].append(mail_id.decode("UTF-8"))
 
     return data
 
@@ -66,7 +64,6 @@ def get_df(email_data):
         }
     )
     df["amount"] = df["amount"].astype(float)
-    df["mail_id"] = df["mail_id"].apply(lambda x: int(x))
     df["upi_ref_id"] = df["upi_ref_id"].apply(lambda x: int(x))
 
     df["transaction_date"] = df["transaction_date"].apply(
