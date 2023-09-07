@@ -54,33 +54,46 @@ def add_new_transactions():
         dt = datetime.fromisoformat(last_transaction_timestamp[:-6])
         last_transaction_date = dt.replace(hour=0, minute=0, second=0, microsecond=0)
 
-        transactions_on_latest_date = (
+        transactions_on_last_transaction_date = (
             supabase.table("transactions")
-            .select("*")
+            .select("upi_ref_id")
             .gte("transaction_date", last_transaction_date)
             .execute()
         )
 
-        existing_mail_ids = list(
-            map(lambda x: x["mail_id"], transactions_on_latest_date.data)
+        print(transactions_on_last_transaction_date.data)
+
+        transactions_on_last_transaction_date_ids = list(
+            map(lambda x: x["upi_ref_id"], transactions_on_last_transaction_date.data)
         )
-        mail_ids = search_inbox(last_transaction_date, fetch_type="latest")
-        unpublished_mail_ids = [
-            x for x in mail_ids if int(x.decode("UTF-8")) not in existing_mail_ids
+
+        mail_ids_since_last_transaction_date = search_inbox(
+            last_transaction_date, fetch_type="latest"
+        )
+
+        email_data = parse_email(mail_ids_since_last_transaction_date)
+        email_df = get_df(email_data)
+        filtered_email_df = email_df[
+            ~email_df["upi_ref_id"].isin(transactions_on_last_transaction_date_ids)
         ]
 
-        if len(unpublished_mail_ids) == 0:
-            return {"message": "All upto date"}
+        if filtered_email_df.shape[0] == 0:
+            return {
+                "last_transaction_date": last_transaction_date,
+                "message": "All upto date",
+                "mails_count": 0,
+            }
 
-        email_data = parse_email(unpublished_mail_ids)
-        email_df = get_df(email_data)
-
-        for index, row in email_df.iterrows():
+        for index, row in filtered_email_df.iterrows():
             curr_dict = email_df.iloc[index].to_dict()
             curr_dict["payment_mode"] = "UPI"
             data, count = supabase.table("transactions").insert(curr_dict).execute()
 
-        return {"message": "Rows added", "mails_count": email_df.shape[0]}
+        return {
+            "last_transaction_date": last_transaction_date,
+            "message": "Rows added",
+            "mails_count": filtered_email_df.shape[0],
+        }
 
     except Exception as e:
         return {"message": str(e)}
