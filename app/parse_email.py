@@ -36,12 +36,15 @@ def parse_email(mail_ids):
 
                 for span in spans:
                     # Only get span which contains UPI Ref No
-                    if span.text.find("UPI Ref. No. ") != -1:
+                    if (
+                        "UPI Ref. No. " in span.text
+                        and "Transaction Status: FAILED" not in span.text
+                    ):
                         # Get key:value pairs by splitting
                         lines = str(span).split("<br/>")
                         for line in lines:
                             # Only get the line which contains ':' and does not start with '<'
-                            if not line.startswith("<") and line.find(":") != -1:
+                            if not line.startswith("<") and ":" in line:
                                 [pay_key, pay_val] = line.strip().split(":", 1)
                                 pay_key = pay_key.strip()
                                 pay_val = pay_val.strip()
