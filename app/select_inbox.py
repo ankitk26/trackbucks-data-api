@@ -1,55 +1,53 @@
 import imaplib
-from os import getenv
+import os
+import sys
+from dotenv import load_dotenv
+from datetime import datetime
 
-USER = getenv("USER")
-PWD = getenv("USER_PASSWORD")
-SMTP_SERVER = "imap.gmail.com"
-SMTP_PORT = 993
-CHECK_MAIL = getenv("CHECK_MAIL")
+# Load environment variables
+load_dotenv()
 
+USER = os.getenv("USER")
+PWD = os.getenv("USER_PASSWORD")
+SMTP_SERVER = os.getenv("SMTP_SERVER", "imap.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 993))
+CHECK_MAIL = os.getenv("CHECK_MAIL", "").strip()
 
-def get_decoded_ids(mails):
-    mail_ids = mails[1][0].split()
-    if len(mail_ids) == 0:
-        return []
-    return mail_ids
+# Exit if credentials are missing
+if not USER or not PWD:
+    print("Missing EMAIL credentials (USER or USER_PASSWORD)")
+    sys.exit(1)
 
-
-def search(key, value, con):
-    result, data = con.search(None, key, '"{}"'.format(value))
-    return data
-
-
-def get_all_mails(mail):
-    all_data = mail.search(None, "FROM", f'"{CHECK_MAIL}"')
-    return get_decoded_ids(all_data)
-
-
-def get_unpublished_mails(mail, latest_date):
-    # Convert timestamp to 'DD-MMM-YYYY' format
-    formatted_dt = latest_date.strftime("%d-%b-%Y")
-
-    unpublished_mails = mail.search(
-        None, "FROM", f'"{CHECK_MAIL}"', "SINCE", formatted_dt.upper()
-    )
-
-    return get_decoded_ids(unpublished_mails)
+# Exit if CHECK_MAIL is not provided
+if not CHECK_MAIL:
+    print("No email specified in CHECK_MAIL")
+    sys.exit(1)
 
 
-def get_mail():
-    mail = imaplib.IMAP4_SSL(SMTP_SERVER)
+# Establish IMAP connection and login
+def get_mail_connection():
+    mail = imaplib.IMAP4_SSL(SMTP_SERVER, SMTP_PORT)
     mail.login(USER, PWD)
     mail.select("INBOX", readonly=True)
     return mail
 
 
-def search_inbox(latest_date="", fetch_type="all"):
-    # Establish mail connection
-    mail = get_mail()
+# Fetch all emails or only those after the latest_date
+def get_mail_ids(latest_date: datetime = None):
+    with get_mail_connection() as mail:
+        search_query = ["FROM", f'"{CHECK_MAIL}"']
 
-    if fetch_type == "all":
-        all_mail_ids = get_all_mails(mail)
-        return all_mail_ids
+        if latest_date:
+            print("Filter dates")
+            formatted_date = latest_date.strftime("%d-%b-%Y").upper()
+            search_query.extend(["SINCE", formatted_date])
 
-    latest_mail_ids = get_unpublished_mails(mail, latest_date)
-    return latest_mail_ids
+        # Unpack list into arguments
+        data = mail.search(None, *search_query)
+
+        # Decode mail IDs
+        return (
+            data[1][0].split()
+            if data[1] and isinstance(data[1][0], bytes) and data[1][0]
+            else []
+        )

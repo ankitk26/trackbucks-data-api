@@ -1,97 +1,212 @@
 from datetime import datetime
-from os import getenv
+from fastapi import APIRouter, HTTPException
+from psycopg2 import DatabaseError, OperationalError, InterfaceError
+from contextlib import closing
+from app.db import get_connection, release_connection, init_db
+from app.mail.parse_email import get_mail_dataframe, get_parsed_emails
+from app.mail.search_inbox import get_mail_ids
 
-from fastapi import FastAPI
-from supabase import Client, create_client
-
-from .parse_email import get_df, parse_email
-from .select_inbox import search_inbox
-
-# Supabase credentials
-SUPABASE_URL = "https://qjgsmbsouzljaczqfkkv.supabase.co"
-SUPABASE_KEY = getenv("SUPABASE_KEY")
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-app = FastAPI()
+router = APIRouter()
 
 
-# Get all transactions from supabase
-@app.get("/transactions")
+# Fetch all transactions from transactions table
+# This endpoint will not be used in the client. This is just for testing purpose
+@router.get("/transactions")
 def get_transactions():
-    response = supabase.table("transactions").select("*").execute()
-    return response.data
-
-
-# Populate all mails to supabase
-@app.post("/transactions")
-def populate_all_transactions():
-    mail_ids = search_inbox()
-    email_data = parse_email(mail_ids)
-
-    email_df = get_df(email_data)
-
-    for index, row in email_df.iterrows():
-        curr_dict = email_df.iloc[index].to_dict()
-        curr_dict["payment_mode"] = "UPI"
-        data, count = supabase.table("transactions").insert(curr_dict).execute()
-
-    return {"message": "Rows added", "mails_count": email_df.shape[0]}
-
-
-# Populate new transactions not present in supabase
-@app.post("/new-transactions")
-def add_new_transactions():
+    conn = get_connection()
     try:
-        last_transaction_timestamp = (
-            supabase.table("transactions")
-            .select("transaction_date")
-            .order("transaction_date", desc=True)
-            .limit(1)
-            .single()
-            .execute()
-            .data["transaction_date"]
+        with closing(conn.cursor()) as cursor:
+            cursor.execute("SELECT * FROM transactions")
+            transactions = cursor.fetchall()
+            column_names = [desc[0] for desc in cursor.description]
+            return [dict(zip(column_names, row)) for row in transactions]
+    except DatabaseError as e:
+        print(f"Error fetching transactions: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        release_connection(conn)
+
+
+# Generic function to process transactions from the mailbox
+# This can be used for fetching latest transactions or doing a full refresh
+def process_transactions(cursor, mail_df=None):
+    if mail_df is not None and mail_df.empty:
+        return
+
+    # Get distinct receiver_id and receiver_name from mail_df dataframe
+    # Sort by transaction_date so that old names are added first and then if it has updated, it can get updated
+    distinct_receivers = mail_df.sort_values("transaction_date")[
+        ["receiver_upi", "receiver_name"]
+    ].drop_duplicates()
+
+    # Convert dataframe to list of tuples containing two values - receiver_id and receiver_name
+    receiver_data = list(distinct_receivers.itertuples(index=False, name=None))
+
+    # Insert receivers into "receiver" table
+    # ON CONFLICT - this will update the name with the latest name if a receiver_upi is matched
+    cursor.executemany(
+        """
+            INSERT INTO receiver (receiver_upi, receiver_name, category_id)
+            VALUES (%s, %s, 0)
+            ON CONFLICT (receiver_upi) DO UPDATE
+            SET receiver_name = EXCLUDED.receiver_name
+        """,
+        receiver_data,
+    )
+
+    # Fetch receiver_id mappings
+    receiver_mapping = {}
+
+    # Get list of receivers that were newly added into receiver table
+    receiver_upis = distinct_receivers["receiver_upi"].tolist()
+    if receiver_upis:
+        # Fetch the receiver_id for all receiver_upi(s) added newly in receiver table
+        cursor.execute(
+            """
+            SELECT receiver_id, receiver_upi FROM receiver where receiver_upi = ANY(%s)
+            """,
+            (receiver_upis,),
         )
-        dt = datetime.fromisoformat(last_transaction_timestamp[:-6])
-        last_transaction_date = dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Set key as receiver_upi and value as receiver_id in receiver_mapping dictionary
+        receiver_mapping = {row[1]: row[0] for row in cursor.fetchall()}
 
-        transactions_on_last_transaction_date = (
-            supabase.table("transactions")
-            .select("upi_ref_id")
-            .gte("transaction_date", last_transaction_date)
-            .execute()
+    # Prepare transactions
+    transaction_data = []
+    for _, row in mail_df.iterrows():
+        # Get receiver_id processed above
+        receiver_id = receiver_mapping.get(row.receiver_upi)
+        # Append tuple of transaction in transaction_data list
+        transaction_data.append(
+            (
+                row.upi_ref_no,
+                row.amount,
+                row.sender_upi,
+                receiver_id,
+                row.transaction_date,
+                "UPI",
+                None,  # category_id
+                0,  # is_overwritten_category
+            )
         )
 
-        transactions_on_last_transaction_date_ids = list(
-            map(lambda x: x["upi_ref_id"], transactions_on_last_transaction_date.data)
-        )
+    # Insert all transactions. If any repetitive upi_ref_no is found, do nothing and continue insert operation
+    cursor.executemany(
+        """
+        INSERT INTO transactions (upi_ref_no, amount, sender_upi, receiver_id, transaction_date, payment_mode, category_id, is_category_overwritten)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (upi_ref_no) DO NOTHING
+    """,
+        transaction_data,
+    )
 
-        mail_ids_since_last_transaction_date = search_inbox(
-            last_transaction_date, fetch_type="latest"
-        )
 
-        email_data = parse_email(mail_ids_since_last_transaction_date)
-        email_df = get_df(email_data)
-        filtered_email_df = email_df[
-            ~email_df["upi_ref_id"].isin(transactions_on_last_transaction_date_ids)
-        ]
+# Clears and reloads the receiver & transactions tables from scratch
+@router.post("/full-refresh-transactions")
+def full_refresh_transactions():
+    mail_ids = get_mail_ids()
+    parsed_mail_data = get_parsed_emails(mail_ids)
+    mail_df = get_mail_dataframe(parsed_mail_data)
 
-        if filtered_email_df.shape[0] == 0:
-            return {
-                "last_transaction_date": last_transaction_date,
-                "message": "All upto date",
-                "mails_count": 0,
-            }
+    # Connect to DB as above operation can take atleast 10 minutes
+    # Hence this endpoint will be called rarely
+    init_db()
 
-        for index, row in filtered_email_df.iterrows():
-            curr_dict = email_df.iloc[index].to_dict()
-            curr_dict["payment_mode"] = "UPI"
-            data, count = supabase.table("transactions").insert(curr_dict).execute()
+    # Get connection to DB
+    conn = get_connection()
+    try:
+        # Close connection once DB transaction is completed
+        with closing(conn.cursor()) as cursor:
+            # Truncate transaction and receiver table
+            cursor.execute(
+                "TRUNCATE TABLE transactions, receiver RESTART IDENTITY CASCADE;"
+            )
+            # Commit above operation
+            conn.commit()
 
-        return {
-            "last_transaction_date": last_transaction_date,
-            "message": "Rows added",
-            "mails_count": filtered_email_df.shape[0],
-        }
+            # Process all transactions. Pass the cursor and mail_df as parameters
+            process_transactions(cursor, mail_df)
 
+            # Above function had some insert operations. Commit those changes
+            conn.commit()
+
+            # Return success response if everything went fine
+            return {"status": "ok", "message": "Full refresh completed successfully"}
+    except (OperationalError, InterfaceError) as e:
+        # Rollback in case some error occured during transaction
+        if conn and not conn.closed:
+            conn.rollback()
+
+        # Return failure response
+        return {"status": "error", "message": "Database connection lost. Please retry."}
     except Exception as e:
-        return {"message": str(e)}
+        if conn and not conn.closed:
+            conn.rollback()
+        print(f"Error occurred: {e}")
+        raise e
+    finally:
+        release_connection(conn)
+
+
+@router.post("/new-transactions")
+def populate_new_transactions():
+    # Get DB connection
+    conn = get_connection()
+    try:
+        with closing(conn.cursor()) as cursor:
+            # Get latest transaction date before fetching emails
+            cursor.execute("SELECT MAX(transaction_date) FROM transactions")
+            max_transaction_date = cursor.fetchone()[0]
+    except Exception as e:
+        release_connection(conn)
+        return {
+            "status": "error",
+            "message": "Something went wrong",
+        }
+        raise e
+    finally:
+        # Release connection
+        release_connection(conn)
+
+    if max_transaction_date is None:
+        max_transaction_date = datetime(2023, 1, 1)
+
+    # Read latest transactions based on max_transaction_date passed
+    mail_ids = get_mail_ids(latest_date=max_transaction_date)
+
+    # Get mail data in dictionary
+    parsed_mail_data = get_parsed_emails(mail_ids)
+
+    # Convert mail in dictionary format to a dataframe
+    mail_df = get_mail_dataframe(parsed_mail_data)
+
+    if mail_df.empty:
+        return {"response": "ok", "message": "No new transactions found."}
+
+    # Connect to DB as above operation just to be safe DB is not closed due to being idle for long time
+    init_db()
+
+    # Reconnect to database
+    conn = get_connection()
+    try:
+        with closing(conn.cursor()) as cursor:
+            process_transactions(cursor, mail_df)
+            conn.commit()
+
+            return {
+                "status": "ok",
+                "message": "Incremental transactions processed successfully",
+            }
+    except (OperationalError, InterfaceError) as e:
+        if conn and not conn.closed:
+            conn.rollback()
+        return {
+            "status": "error",
+            "message": "Database connection lost. Please retry",
+        }
+    except Exception as e:
+        if conn and not conn.closed:
+            conn.rollback()
+        print(f"Error occurred: {e}")
+        raise e
+    finally:
+        release_connection(conn)

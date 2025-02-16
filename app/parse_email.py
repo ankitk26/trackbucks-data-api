@@ -3,13 +3,13 @@ from datetime import datetime
 
 import pandas as pd
 from bs4 import BeautifulSoup
-from .select_inbox import get_mail
+from app.mail.search_inbox import get_mail_connection
 
 
-def parse_email(mail_ids):
-    mail = get_mail()
+def get_parsed_emails(mail_ids):
+    mail_connection = get_mail_connection()
 
-    data = {
+    parsed_mail_data = {
         "UPI Ref. No.": [],
         "To VPA": [],
         "From VPA": [],
@@ -19,15 +19,19 @@ def parse_email(mail_ids):
     }
 
     for mail_id in mail_ids:
-        r, mail_data = mail.fetch(mail_id, "(RFC822)")
-        raw_mail = email.message_from_bytes(mail_data[0][1])
+        result, fetched_mail_data = mail_connection.fetch(mail_id, "(RFC822)")
+
+        if not fetched_mail_data or not isinstance(fetched_mail_data[0], tuple):
+            continue  # Skip if no valid data found
+
+        raw_mail = email.message_from_bytes(fetched_mail_data[0][1])
 
         # Walk through mail content
         for part in raw_mail.walk():
             # Get mail body
             body = part.get_payload(decode=True)
 
-            if body is not None:
+            if body:
                 # Parse body content
                 soup = BeautifulSoup(body, "html.parser")
 
@@ -45,32 +49,35 @@ def parse_email(mail_ids):
                         for line in lines:
                             # Only get the line which contains ':' and does not start with '<'
                             if not line.startswith("<") and ":" in line:
-                                [pay_key, pay_val] = line.strip().split(":", 1)
-                                pay_key = pay_key.strip()
-                                pay_val = pay_val.strip()
-                                if pay_key in data:
-                                    data[pay_key].append(pay_val)
+                                pay_key, pay_val = map(str.strip, line.split(":", 1))
+                                if pay_key in parsed_mail_data:
+                                    parsed_mail_data[pay_key].append(pay_val)
 
-    return data
+    return parsed_mail_data
 
 
-def get_df(email_data):
+def get_mail_dataframe(email_data):
     df = pd.DataFrame(email_data)
+
+    # Rename columns
     df = df.rename(
         columns={
-            "UPI Ref. No.": "upi_ref_id",
+            "UPI Ref. No.": "upi_ref_no",
             "Amount": "amount",
             "From VPA": "sender_upi",
             "To VPA": "receiver_upi",
-            "Payee Name": "payee_name",
+            "Payee Name": "receiver_name",
             "Transaction Date": "transaction_date",
         }
     )
-    df["amount"] = df["amount"].astype(float)
-    df["upi_ref_id"] = df["upi_ref_id"].apply(lambda x: int(x))
 
-    df["transaction_date"] = df["transaction_date"].apply(
-        lambda x: str(datetime.strptime(x, "%d/%m/%Y %H:%M:%S"))
+    # Convert data types
+    df["amount"] = df["amount"].astype(float)
+    df["upi_ref_no"] = df["upi_ref_no"].astype(
+        str
+    )  # Keeping as string to avoid precision loss
+    df["transaction_date"] = pd.to_datetime(
+        df["transaction_date"], format="%d/%m/%Y %H:%M:%S"
     )
 
     return df
