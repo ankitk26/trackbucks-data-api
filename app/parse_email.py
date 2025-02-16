@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pandas as pd
 from bs4 import BeautifulSoup
-from app.mail.search_inbox import get_mail_connection
+from app.search_inbox import get_mail_connection
 
 
 def get_parsed_emails(mail_ids):
