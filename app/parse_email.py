@@ -57,27 +57,25 @@ def get_parsed_emails(mail_ids):
 
 
 def get_mail_dataframe(email_data):
-    df = pd.DataFrame(email_data)
+    mail_df = pd.DataFrame(email_data)
 
     # Rename columns
-    df = df.rename(
+    mail_df = mail_df.rename(
         columns={
             "UPI Ref. No.": "upi_ref_no",
             "Amount": "amount",
-            "From VPA": "sender_upi",
-            "To VPA": "receiver_upi",
+            "From VPA": "sender_upi_id",
+            "To VPA": "receiver_upi_id",
             "Payee Name": "receiver_name",
             "Transaction Date": "transaction_date",
         }
     )
 
     # Convert data types
-    df["amount"] = df["amount"].astype(float)
-    df["upi_ref_no"] = df["upi_ref_no"].astype(
-        str
-    )  # Keeping as string to avoid precision loss
-    df["transaction_date"] = pd.to_datetime(
-        df["transaction_date"], format="%d/%m/%Y %H:%M:%S"
+    mail_df["amount"] = mail_df["amount"].astype(float)
+    mail_df["upi_ref_no"] = mail_df["upi_ref_no"].astype(str)
+    mail_df["transaction_date"] = pd.to_datetime(
+        mail_df["transaction_date"], format="%d/%m/%Y %H:%M:%S"
     )
 
-    return df
+    return mail_df

@@ -11,17 +11,7 @@ USER = os.getenv("USER")
 PWD = os.getenv("USER_PASSWORD")
 SMTP_SERVER = os.getenv("SMTP_SERVER", "imap.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 993))
-CHECK_MAIL = os.getenv("CHECK_MAIL", "").strip()
-
-# Exit if credentials are missing
-if not USER or not PWD:
-    print("Missing EMAIL credentials (USER or USER_PASSWORD)")
-    sys.exit(1)
-
-# Exit if CHECK_MAIL is not provided
-if not CHECK_MAIL:
-    print("No email specified in CHECK_MAIL")
-    sys.exit(1)
+CHECK_MAIL = os.getenv("CHECK_MAIL")
 
 
 # Establish IMAP connection and login
@@ -38,7 +28,6 @@ def get_mail_ids(latest_date: datetime = None):
         search_query = ["FROM", f'"{CHECK_MAIL}"']
 
         if latest_date:
-            print("Filter dates")
             formatted_date = latest_date.strftime("%d-%b-%Y").upper()
             search_query.extend(["SINCE", formatted_date])
 
